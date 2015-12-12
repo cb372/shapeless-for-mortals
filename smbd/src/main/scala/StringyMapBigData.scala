@@ -6,6 +6,8 @@
  */
 package s4m.smbd
 
+import java.util
+
 import shapeless._, labelled.{ field, FieldType }
 
 /**
@@ -42,12 +44,61 @@ package object impl {
   import api._
 
   // EXERCISE 1.1 goes here
-  // implicit def hNilBigDataFormat = ???
-  // implicit def hListBigDataFormat = ???
+  implicit object HNilBigDataFormat extends BigDataFormat[HNil] {
+    def label: String = "don't care"
+    def toProperties(t: HNil): StringyMap = new StringyMap()
+    def fromProperties(m: StringyMap): BigResult[HNil] = Right(HNil)
+  }
+
+  implicit def hListBigDataFormat[Key <: Symbol, Value, Remaining <: HList](
+    implicit
+    key: Witness.Aux[Key],
+    headSPrimitive: SPrimitive[Value],
+    lazyTailFormat: Lazy[BigDataFormat[Remaining]]
+  ): BigDataFormat[FieldType[Key, Value] :: Remaining] = new BigDataFormat[FieldType[Key, Value] :: Remaining] {
+    def label: String = "don't care"
+    def toProperties(t: FieldType[Key, Value] :: Remaining): StringyMap = {
+      val map = lazyTailFormat.value.toProperties(t.tail)
+      val primitive = headSPrimitive.toValue(t.head)
+      map.put(key.value.name, primitive)
+      map
+    }
+    def fromProperties(map: StringyMap): BigResult[FieldType[Key, Value] :: Remaining] = {
+      for {
+        head <- Option(map.get(key.value.name)).map(headSPrimitive.fromValue).toRight(s"Missing field: ${key.value}").right
+        tail <- lazyTailFormat.value.fromProperties(map).right
+      } yield field[Key](head) :: tail
+    }
+  }
+
+  implicit object StringSPrimitive extends SPrimitive[String] {
+    def toValue(v: String): AnyRef = v
+    def fromValue(v: AnyRef): String = v.asInstanceOf[String]
+  }
+
+  implicit object IntSPrimitive extends SPrimitive[Int] {
+    def toValue(v: Int): AnyRef = Integer.valueOf(v)
+    def fromValue(v: AnyRef): Int = v.asInstanceOf[Integer].toInt
+  }
+
+  implicit object BooleanSPrimitive extends SPrimitive[Boolean] {
+    def toValue(v: Boolean): AnyRef = java.lang.Boolean.valueOf(v)
+    def fromValue(v: AnyRef): Boolean = v.asInstanceOf[java.lang.Boolean].booleanValue()
+  }
+
   // implicit def cNilBigDataFormat = ???
   // implicit def coproductBigDataFormat = ???
 
-  implicit def familyBigDataFormat[T] = ???
+  implicit def familyBigDataFormat[T, Repr](
+    implicit
+    gen: LabelledGeneric.Aux[T, Repr],
+    lazyBigDataFormat: Lazy[BigDataFormat[Repr]],
+    tpe: Typeable[T]
+  ): BigDataFormat[T] = new BigDataFormat[T] {
+    def label: String = tpe.describe
+    def fromProperties(m: StringyMap): BigResult[T] = lazyBigDataFormat.value.fromProperties(m).right.map(hlist => gen.from(hlist))
+    def toProperties(t: T): StringyMap = lazyBigDataFormat.value.toProperties(gen.to(t))
+  }
 }
 
 package impl {
