@@ -86,8 +86,39 @@ package object impl {
     def fromValue(v: AnyRef): Boolean = v.asInstanceOf[java.lang.Boolean].booleanValue()
   }
 
-  // implicit def cNilBigDataFormat = ???
-  // implicit def coproductBigDataFormat = ???
+  implicit object CNilBigDataFormat extends BigDataFormat[CNil] {
+    def label: String = "don't care"
+    def toProperties(t: CNil): StringyMap = throw new RuntimeException("Oops!")
+    def fromProperties(m: StringyMap): BigResult[CNil] = Left("Shouldn't be here!")
+  }
+
+  implicit def coproductBigDataFormat[Name <: Symbol, Head, Tail <: Coproduct](
+    implicit
+    key: Witness.Aux[Name],
+    lazyHeadFormat: Lazy[BigDataFormat[Head]],
+    lazyTailFormat: Lazy[BigDataFormat[Tail]]
+  ): BigDataFormat[FieldType[Name, Head] :+: Tail] = new BigDataFormat[FieldType[Name, Head] :+: Tail] {
+    def label: String = key.value.name
+    def toProperties(t: FieldType[Name, Head] :+: Tail): StringyMap = t match {
+      case Inl(head) =>
+        val map = lazyHeadFormat.value.toProperties(head)
+        map.put("_typeHint", key.value.name)
+        map
+      case Inr(tail) =>
+        lazyTailFormat.value.toProperties(tail)
+    }
+    def fromProperties(m: StringyMap): BigResult[FieldType[Name, Head] :+: Tail] = {
+      if (m.get("_typeHint").asInstanceOf[String] == label) {
+        lazyHeadFormat.value.fromProperties(m).right map { headResult =>
+          Inl(field[Name](headResult))
+        }
+      } else {
+        lazyTailFormat.value.fromProperties(m).right map { tailResult =>
+          Inr(tailResult)
+        }
+      }
+    }
+  }
 
   implicit def familyBigDataFormat[T, Repr](
     implicit

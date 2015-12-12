@@ -7,7 +7,10 @@ import shapeless._
 import org.scalatest._
 import s4m.smbd.impl._
 
-case class Teapot(a: String, b: Int, c: Boolean)
+sealed trait Receptacle
+case class Teapot(a: String, b: Int, c: Boolean) extends Receptacle
+case class Bottle(foo: String, bar: Double) extends Receptacle
+case object Glass extends Receptacle
 
 class StringyMapBigDataSpec extends FlatSpec with Matchers {
 
@@ -20,6 +23,16 @@ class StringyMapBigDataSpec extends FlatSpec with Matchers {
     stringyMap.get("c") shouldBe true
 
     format.fromProperties(stringyMap) should be(Right(teapot))
+  }
+
+  "StringyMapBigData" should "marshall a sealed trait" in {
+    val teapot = Teapot("foo", 42, true)
+    val bottle = Bottle("hello", 1.23)
+    val glass = Glass
+    val format = implicitly[BigDataFormat[Receptacle]]
+    format.fromProperties(format.toProperties(teapot)) should be(Right(teapot))
+    format.fromProperties(format.toProperties(bottle)) should be(Right(bottle))
+    format.fromProperties(format.toProperties(glass)) should be(Right(glass))
   }
 
 }
