@@ -61,7 +61,7 @@ package app {
       val stringyMap = new StringyMap()
       stringyMap.put("z", "foo")
 
-      TeapotF.fromProperties(stringyMap) shouldBe Left("some sensible error here")
+      TeapotF.fromProperties(stringyMap) should be('left)
     }
 
     it should "round trip sealed traits" in {

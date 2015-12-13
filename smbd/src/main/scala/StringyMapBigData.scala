@@ -41,17 +41,109 @@ package api {
 package object impl {
   import api._
 
-  // EXERCISE 1.1 goes here
-  // implicit def hNilBigDataFormat = ???
-  // implicit def hListBigDataFormat = ???
-  // implicit def cNilBigDataFormat = ???
-  // implicit def coproductBigDataFormat = ???
+  implicit object HNilBigDataFormat extends BigDataFormat[HNil] {
+    def label: String = "don't care"
+    def toProperties(t: HNil): StringyMap = new StringyMap()
+    def fromProperties(m: StringyMap): BigResult[HNil] = Right(HNil)
+  }
 
-  implicit def familyBigDataFormat[T] = ???
+  implicit def hListBigDataFormat[Key <: Symbol, Value, Remaining <: HList](
+    implicit
+    key: Witness.Aux[Key],
+    headSPrimitive: SPrimitive[Value],
+    lazyTailFormat: Lazy[BigDataFormat[Remaining]]
+  ): BigDataFormat[FieldType[Key, Value] :: Remaining] = new BigDataFormat[FieldType[Key, Value] :: Remaining] {
+    def label: String = "don't care"
+    def toProperties(t: FieldType[Key, Value] :: Remaining): StringyMap = {
+      val map = lazyTailFormat.value.toProperties(t.tail)
+      val headValue = headSPrimitive.toValue(t.head)
+      if (headValue != null) map.put(key.value.name, headValue)
+      map
+    }
+    def fromProperties(map: StringyMap): BigResult[FieldType[Key, Value] :: Remaining] = {
+      val headResult = map.get(key.value.name) match {
+        case null =>
+          Left(s"Missing field: ${key.value}")
+        case value =>
+          Right(headSPrimitive.fromValue(value))
+      }
+      val tailResult = lazyTailFormat.value.fromProperties(map)
+      for {
+        head <- headResult.right
+        tail <- tailResult.right
+      } yield field[Key](head) :: tail
+    }
+  }
+
+  implicit object StringSPrimitive extends SPrimitive[String] {
+    def toValue(v: String): AnyRef = v
+    def fromValue(v: AnyRef): String = v.asInstanceOf[String]
+  }
+
+  implicit object IntSPrimitive extends SPrimitive[Int] {
+    def toValue(v: Int): AnyRef = Integer.valueOf(v)
+    def fromValue(v: AnyRef): Int = v.asInstanceOf[Integer].toInt
+  }
+
+  implicit object DoubleSPrimitive extends SPrimitive[Double] {
+    def toValue(v: Double): AnyRef = java.lang.Double.valueOf(v)
+    def fromValue(v: AnyRef): Double = v.asInstanceOf[java.lang.Double].toDouble
+  }
+
+  implicit object BooleanSPrimitive extends SPrimitive[Boolean] {
+    def toValue(v: Boolean): AnyRef = java.lang.Boolean.valueOf(v)
+    def fromValue(v: AnyRef): Boolean = v.asInstanceOf[java.lang.Boolean].booleanValue()
+  }
+
+  implicit object CNilBigDataFormat extends BigDataFormat[CNil] {
+    def label: String = "don't care"
+    def toProperties(t: CNil): StringyMap = throw new RuntimeException("Oops!")
+    def fromProperties(m: StringyMap): BigResult[CNil] = Left("Shouldn't be here!")
+  }
+
+  implicit def coproductBigDataFormat[Name <: Symbol, Head, Tail <: Coproduct](
+    implicit
+    key: Witness.Aux[Name],
+    lazyHeadFormat: Lazy[BigDataFormat[Head]],
+    lazyTailFormat: Lazy[BigDataFormat[Tail]]
+  ): BigDataFormat[FieldType[Name, Head] :+: Tail] = new BigDataFormat[FieldType[Name, Head] :+: Tail] {
+    def label: String = key.value.name
+    def toProperties(t: FieldType[Name, Head] :+: Tail): StringyMap = t match {
+      case Inl(head) =>
+        val map = lazyHeadFormat.value.toProperties(head)
+        map.put("_typeHint", key.value.name)
+        map
+      case Inr(tail) =>
+        lazyTailFormat.value.toProperties(tail)
+    }
+    def fromProperties(m: StringyMap): BigResult[FieldType[Name, Head] :+: Tail] = {
+      if (m.get("_typeHint").asInstanceOf[String] == label) {
+        lazyHeadFormat.value.fromProperties(m).right map { headResult =>
+          Inl(field[Name](headResult))
+        }
+      } else {
+        lazyTailFormat.value.fromProperties(m).right map { tailResult =>
+          Inr(tailResult)
+        }
+      }
+    }
+  }
+
+  implicit def familyBigDataFormat[T, Repr](
+    implicit
+    gen: LabelledGeneric.Aux[T, Repr],
+    lazyBigDataFormat: Lazy[BigDataFormat[Repr]],
+    tpe: Typeable[T]
+  ): BigDataFormat[T] = new BigDataFormat[T] {
+    def label: String = tpe.describe
+    def fromProperties(m: StringyMap): BigResult[T] = lazyBigDataFormat.value.fromProperties(m).right.map(hlist => gen.from(hlist))
+    def toProperties(t: T): StringyMap = lazyBigDataFormat.value.toProperties(gen.to(t))
+  }
+
 }
 
 package impl {
-  import api._
+  //import api._
 
   // EXERCISE 1.2 goes here
 }
